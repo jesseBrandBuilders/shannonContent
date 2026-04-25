@@ -1,0 +1,7 @@
+# Supabase project configuration
+# https://supabase.com/docs/guides/cli/config
+
+project_id = "shannon-content-studio"
+
+[functions.claude-draft]
+verify_jwt = true
