@@ -106,6 +106,17 @@ curl -X POST "https://YOUR-REF.supabase.co/functions/v1/audiencelab-webhook?toke
   -d '[{"FIRST_NAME":"Test","LAST_NAME":"Lead","JOB_TITLE":"CEO","COMPANY_NAME":"Acme","COMPANY_EMPLOYEE_COUNT":"51-200","LINKEDIN_URL":"https://www.linkedin.com/in/test-lead"}]'
 ```
 
+### Company site check
+
+Each lead's detail shows their company website, so you can weed out posers before writing anything. The domain comes from the lead's company domain, then any website column in the import, then their work email's domain (Gmail and other webmail are ignored); you can type one in too.
+
+The `site-check` function (`supabase functions deploy site-check`) fetches the homepage server-side and flags: live, error status, unreachable or non-resolving domain, parked / for-sale, redirects to a different domain, coming-soon / unfinished pages, no HTTPS. It also reports whether the site allows embedding.
+
+- Sites that allow it are shown **live** in a sandboxed iframe. Their page can't navigate the app or reach Shannon's session.
+- Many sites block embedding (`X-Frame-Options` / CSP `frame-ancestors`). For those the panel shows a **screenshot** from [thum.io](https://www.thum.io/): free for 1,000 a month, no key needed, and only fetched when the live view isn't possible. To use a paid screenshot service instead, set `VITE_SCREENSHOT_URL_TEMPLATE` in Vercel, with `{url}` where the address goes.
+
+Tests: `deno test supabase/functions/site-check/analyze.test.ts`
+
 ### Fit score
 
 Computed in Postgres (`public.score_lead`) on every insert/update, 0–100: owner/CEO/founder +50, COO/integrator/GM +40, VP/director +20, mentions EOS/Traction +15, company size 10–250 +35. Edit the function to retune, then `update public.leads set updated_at = now();` rescores everyone.
@@ -268,7 +279,8 @@ supabase/
     ├── _shared/              leadFields.js (shared with the CSV import), postPrompt.ts, voice.ts
     ├── claude-draft/         AI drafting: posts, outreach, voice profile
     ├── weekly-batch/         Autopilot: drafts a week into Review (plan.ts + tests)
-    └── audiencelab-webhook/  Receives AudienceLab pushes
+    ├── audiencelab-webhook/  Receives AudienceLab pushes
+    └── site-check/           Lead website check (analyze.ts + tests)
 ```
 
 ---

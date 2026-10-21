@@ -14,3 +14,7 @@ verify_jwt = false
 # Called by pg_cron (x-cron-secret) or the app (user JWT, checked in code).
 [functions.weekly-batch]
 verify_jwt = false
+
+# Signed-in users only.
+[functions.site-check]
+verify_jwt = true
