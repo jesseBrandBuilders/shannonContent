@@ -8,16 +8,21 @@ import {
   BarChart3,
   LogOut,
   Sparkles,
-  Target
+  Target,
+  Inbox,
+  Bot
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
 const navItems = [
+  // First five also form the mobile bottom bar
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
+  { to: '/review', icon: Inbox, label: 'Review' },
   { to: '/leads', icon: Target, label: 'Leads' },
-  { to: '/composer', icon: PenLine, label: 'Composer' },
   { to: '/library', icon: Library, label: 'Library' },
   { to: '/calendar', icon: Calendar, label: 'Calendar' },
+  { to: '/composer', icon: PenLine, label: 'Composer' },
+  { to: '/autopilot', icon: Bot, label: 'Autopilot' },
   { to: '/templates', icon: LayoutTemplate, label: 'Templates' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' }
 ];

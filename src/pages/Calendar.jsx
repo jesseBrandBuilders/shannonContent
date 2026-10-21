@@ -120,9 +120,11 @@ export default function Calendar() {
                     {dayPosts.slice(0, 2).map((p) => (
                       <Link
                         key={p.id}
-                        to={`/composer?id=${p.id}`}
+                        to={p.status === 'review' ? '/review' : `/composer?id=${p.id}`}
                         className={`block px-1.5 py-0.5 text-[10px] md:text-xs rounded truncate ${
-                          p.status === 'scheduled'
+                          p.status === 'review'
+                            ? 'bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-200'
+                            : p.status === 'scheduled'
                             ? 'bg-amber-100 text-amber-800'
                             : p.status === 'published'
                             ? 'bg-emerald-100 text-emerald-800'

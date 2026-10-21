@@ -10,3 +10,7 @@ verify_jwt = true
 # per-source token in the URL instead.
 [functions.audiencelab-webhook]
 verify_jwt = false
+
+# Called by pg_cron (x-cron-secret) or the app (user JWT, checked in code).
+[functions.weekly-batch]
+verify_jwt = false

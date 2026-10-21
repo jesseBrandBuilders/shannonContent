@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { PenLine, FileText, Calendar, TrendingUp, ArrowUpRight, Sparkles } from 'lucide-react';
+import { PenLine, FileText, Calendar, TrendingUp, ArrowUpRight, Sparkles, Inbox, ChevronRight } from 'lucide-react';
 import { PageHeader } from '../components/layout/PageHeader';
 import { Card, Badge } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -7,6 +7,7 @@ import { usePosts } from '../hooks/usePosts';
 import { format } from 'date-fns';
 
 const STATUS_VARIANT = {
+  review: 'indigo',
   draft: 'default',
   scheduled: 'amber',
   published: 'green'
@@ -16,6 +17,7 @@ export default function Dashboard() {
   const { data: posts = [], isLoading } = usePosts();
 
   const drafts = posts.filter((p) => p.status === 'draft').length;
+  const inReview = posts.filter((p) => p.status === 'review').length;
   const scheduled = posts.filter((p) => p.status === 'scheduled').length;
   const published = posts.filter((p) => p.status === 'published').length;
   const recent = posts.slice(0, 5);
@@ -49,6 +51,23 @@ export default function Dashboard() {
       />
 
       <div className="px-4 md:px-8 pb-8 space-y-6">
+        {inReview > 0 && (
+          <Link to="/review" className="block">
+            <div className="p-4 md:p-5 flex items-center gap-4 rounded-2xl shadow-sm bg-indigo-600 hover:bg-indigo-700 transition-colors">
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+                <Inbox className="w-5 h-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm md:text-base font-semibold text-white">
+                  {inReview} {inReview === 1 ? 'post is' : 'posts are'} ready for your review
+                </p>
+                <p className="text-xs md:text-sm text-indigo-100">Approve, tweak or toss — takes a couple of minutes.</p>
+              </div>
+              <ChevronRight className="w-5 h-5 text-white shrink-0" />
+            </div>
+          </Link>
+        )}
+
         {/* Stats grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
           {stats.map((s) => (

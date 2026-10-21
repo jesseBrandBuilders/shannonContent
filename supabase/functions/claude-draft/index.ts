@@ -1,7 +1,18 @@
 // Supabase Edge Function — Claude AI drafting assistant
 // Deploy with: supabase functions deploy claude-draft
 // Set env: supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+//
+// Modes:
+//   draft | refine      — a LinkedIn post (Composer, Review "redo")
+//   connection | inmail — 1:1 outreach for a lead
+//   voice               — distill Shannon's style guide from her voice_samples and save it
+//
+// Runs as the signed-in user (their JWT is forwarded), so RLS scopes every
+// read to their workspace — that's how drafts pick up her learned voice.
 
+import { createClient } from 'npm:@supabase/supabase-js@2';
+import { postRules, EOS_CONTEXT } from '../_shared/postPrompt.ts';
+import { callClaude, loadVoiceContext, voiceBlock, voiceProfilePrompts } from '../_shared/voice.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 
@@ -17,35 +28,10 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-const EOS_CONTEXT = {
-  level10: 'Level 10 Meetings — the weekly leadership team meeting structure in EOS',
-  rocks: 'Rocks — the 90-day priorities each leader commits to in EOS',
-  vto: 'V/TO (Vision/Traction Organizer) — the two-page document capturing vision and execution plan',
-  people: 'People component — Right Person, Right Seat using GWC (Gets it, Wants it, Capacity)',
-  process: 'Process component — documenting and following the handful of core processes that run the business',
-  traction: 'Traction component — the discipline and accountability to execute on the vision',
-  general: 'general EOS (Entrepreneurial Operating System) topics'
-};
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-function buildSystemPrompt(eosCategory?: string, tone?: string) {
-  return `You are a LinkedIn ghostwriter for Shannon Roberts, an expert EOS (Entrepreneurial Operating System) Implementer who works with leadership teams of growth-minded companies.
-
-Voice guidelines:
-- Tone: ${tone || 'conversational'}
-- Audience: founders, CEOs, leadership team members at small-to-mid-market companies
-- Position Shannon as a practitioner first, not a theorist — draw on real client situations (anonymized)
-- Concrete > abstract. Short lines. Use whitespace. No corporate jargon.
-- The first 2 lines must hook — they're what shows above LinkedIn's "see more" cutoff
-- End with a question or call to engage
-- Keep under 1300 characters where possible (LinkedIn engagement sweet spot)
-- 3-5 hashtags at the end, EOS-relevant
-- Never use emojis unless context strongly calls for it (sparingly, max 1-2)
-- Never use phrases like "in today's fast-paced world", "leverage", "synergy", or other LinkedIn-bro clichés
-
-Topic context: ${EOS_CONTEXT[eosCategory as keyof typeof EOS_CONTEXT] || EOS_CONTEXT.general}
-
-Output ONLY the post content. No preamble, no commentary, no markdown wrappers.`;
-}
+const MIN_VOICE_SAMPLES = 3;
 
 // ---------- 1:1 outreach (connection notes + InMail) ----------
 // LinkedIn caps connection notes at 300 characters on paid plans and InMail
@@ -65,7 +51,7 @@ function describeLead(lead: Record<string, string | null> = {}) {
   return parts.length ? parts.join('\n') : 'No profile details available.';
 }
 
-function buildOutreachPrompt(kind: string) {
+function buildOutreachPrompt(kind: string, voiceProfile: string | null) {
   const shared = `You write 1:1 LinkedIn outreach for Shannon Roberts, an expert EOS (Entrepreneurial Operating System) Implementer who helps leadership teams of growing companies (roughly 10–250 employees) get clear on vision, gain traction and build a healthy team.
 
 Rules:
@@ -73,7 +59,11 @@ Rules:
 - Reference something concrete about the person (role, company, industry, size) so it could not be sent to anyone else.
 - Never invent facts about the person or claim a shared history that isn't given.
 - Never use emojis or hashtags.
-- If a post of Shannon's is supplied, connect it to a challenge someone in their seat likely faces and offer it as useful, not as self-promotion. Include the post link only if one is given.`;
+- If a post of Shannon's is supplied, connect it to a challenge someone in their seat likely faces and offer it as useful, not as self-promotion. Include the post link only if one is given.${
+    voiceProfile
+      ? `\n\nShannon's writing voice (from her posts — carry her word choice and rhythm into this shorter, more personal format):\n${voiceProfile}`
+      : ''
+  }`;
 
   if (kind === 'connection') {
     return `${shared}
@@ -103,29 +93,10 @@ function parseInmail(text: string) {
   return { subject: '', body: text.trim() };
 }
 
-async function callClaude(system: string, userMessage: string, maxTokens = 1500) {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY!,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: 'user', content: userMessage }]
-    })
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    console.error('Anthropic API error:', errText);
-    return { error: errText, status: response.status };
-  }
-  const data = await response.json();
-  return { text: data.content?.[0]?.text || '' };
+// deno-lint-ignore no-explicit-any
+async function workspaceFor(supabase: any): Promise<string | null> {
+  const { data } = await supabase.from('workspace_members').select('workspace_id').limit(1).maybeSingle();
+  return data?.workspace_id ?? null;
 }
 
 Deno.serve(async (req) => {
@@ -135,13 +106,50 @@ Deno.serve(async (req) => {
 
   try {
     if (!ANTHROPIC_API_KEY) {
-      return new Response(
-        JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured on the server' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return json({ error: 'ANTHROPIC_API_KEY not configured on the server' }, 500);
     }
 
+    // User-scoped client: RLS limits reads to the caller's workspace
+    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+      global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } },
+      auth: { persistSession: false }
+    });
+    const workspaceId = await workspaceFor(supabase);
+    const claude = (system: string, user: string, maxTokens?: number) =>
+      callClaude({ apiKey: ANTHROPIC_API_KEY, model: MODEL, system, user, maxTokens });
+
     const { mode, prompt, existingContent, eosCategory, tone, lead, post } = await req.json();
+
+    // ---- Voice profile: learn Shannon's style from her own posts ----
+    if (mode === 'voice') {
+      if (!workspaceId) return json({ error: 'No workspace for this user' }, 403);
+      const { data: samples, error } = await supabase
+        .from('voice_samples')
+        .select('content')
+        .eq('workspace_id', workspaceId)
+        .order('posted_at', { ascending: false, nullsFirst: false })
+        .limit(200);
+      if (error) return json({ error: error.message }, 500);
+
+      const texts = (samples ?? []).map((s: { content: string }) => s.content.trim()).filter((t: string) => t.length > 80);
+      if (texts.length < MIN_VOICE_SAMPLES) {
+        return json({ error: `Add at least ${MIN_VOICE_SAMPLES} of Shannon's posts first (${texts.length} so far).` }, 400);
+      }
+
+      const { system, user, used } = voiceProfilePrompts(texts);
+      const result = await claude(system, user, 1500);
+      if (result.error) return json({ error: 'AI generation failed', detail: result.error }, result.status);
+
+      const profile = result.text!.trim();
+      const { error: saveErr } = await supabase.from('content_settings').upsert(
+        { workspace_id: workspaceId, voice_profile: profile, voice_profile_updated_at: new Date().toISOString() },
+        { onConflict: 'workspace_id' }
+      );
+      if (saveErr) return json({ error: saveErr.message }, 500);
+      return json({ profile, used });
+    }
+
+    const voice = workspaceId ? await loadVoiceContext(supabase, workspaceId) : null;
 
     // ---- Outreach modes: 'connection' | 'inmail' ----
     if (mode === 'connection' || mode === 'inmail') {
@@ -155,71 +163,35 @@ Deno.serve(async (req) => {
         .filter(Boolean)
         .join('\n\n');
 
-      const result = await callClaude(buildOutreachPrompt(mode), userMessage, 800);
-      if (result.error) {
-        return new Response(JSON.stringify({ error: 'AI generation failed', detail: result.error }), {
-          status: result.status,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
+      const result = await claude(buildOutreachPrompt(mode, voice?.profile ?? null), userMessage, 800);
+      if (result.error) return json({ error: 'AI generation failed', detail: result.error }, result.status);
 
-      const out =
+      return json(
         mode === 'inmail'
           ? parseInmail(result.text!)
-          : { subject: '', body: result.text!.trim().replace(/^"|"$/g, '').slice(0, CONNECTION_NOTE_MAX) };
-
-      return new Response(JSON.stringify(out), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+          : { subject: '', body: result.text!.trim().replace(/^"|"$/g, '').slice(0, CONNECTION_NOTE_MAX) }
+      );
     }
 
-    if (!prompt?.trim()) {
-      return new Response(JSON.stringify({ error: 'prompt is required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
+    // ---- Posts: 'draft' | 'refine' ----
+    if (!prompt?.trim()) return json({ error: 'prompt is required' }, 400);
 
     const userMessage =
       mode === 'refine' && existingContent
         ? `Here is an existing draft:\n\n---\n${existingContent}\n---\n\nRefine this based on the following direction: ${prompt}`
         : `Write a LinkedIn post about: ${prompt}`;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 1500,
-        system: buildSystemPrompt(eosCategory, tone),
-        messages: [{ role: 'user', content: userMessage }]
-      })
-    });
+    const system = `${postRules(tone)}
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('Anthropic API error:', errText);
-      return new Response(
-        JSON.stringify({ error: 'AI generation failed', detail: errText }),
-        { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+Topic context: ${EOS_CONTEXT[eosCategory] || EOS_CONTEXT.general}${voiceBlock(voice)}
 
-    const data = await response.json();
-    const content = data.content?.[0]?.text || '';
+Output ONLY the post content. No preamble, no commentary, no markdown wrappers.`;
 
-    return new Response(JSON.stringify({ content }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+    const result = await claude(system, userMessage, 1500);
+    if (result.error) return json({ error: 'AI generation failed', detail: result.error }, result.status);
+    return json({ content: result.text });
   } catch (err) {
     console.error('Edge function error:', err);
-    return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+    return json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
 });

@@ -10,6 +10,8 @@ import Calendar from './pages/Calendar';
 import Templates from './pages/Templates';
 import Analytics from './pages/Analytics';
 import Leads from './pages/Leads';
+import Review from './pages/Review';
+import Autopilot from './pages/Autopilot';
 
 function ProtectedShell() {
   const { session, loading } = useAuth();
@@ -34,7 +36,9 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route element={<ProtectedShell />}>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/review" element={<Review />} />
           <Route path="/leads" element={<Leads />} />
+          <Route path="/autopilot" element={<Autopilot />} />
           <Route path="/composer" element={<Composer />} />
           <Route path="/library" element={<Library />} />
           <Route path="/calendar" element={<Calendar />} />
