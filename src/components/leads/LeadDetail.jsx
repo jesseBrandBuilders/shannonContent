@@ -132,7 +132,7 @@ export function LeadDetail({ lead, workspaceId, onBack, onNext }) {
       {onBack && (
         <button
           onClick={onBack}
-          className="md:hidden flex items-center gap-1.5 text-sm font-medium text-stone-600"
+          className="lg:hidden flex items-center gap-1.5 text-sm font-medium text-stone-600"
         >
           <ArrowLeft className="w-4 h-4" />
           All leads
@@ -228,7 +228,7 @@ export function LeadDetail({ lead, workspaceId, onBack, onNext }) {
           ))}
         </div>
 
-        <div className="grid md:grid-cols-2 gap-3">
+        <div className="grid sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium text-stone-700 mb-1.5">Share a post (optional)</label>
             <select

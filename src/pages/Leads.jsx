@@ -39,7 +39,7 @@ export default function Leads() {
 
   // Desktop: keep the top lead open so Shannon can start working immediately
   useEffect(() => {
-    if (!selectedId && visible.length && window.matchMedia('(min-width: 768px)').matches) {
+    if (!selectedId && visible.length && window.matchMedia('(min-width: 1024px)').matches) {
       setSelectedId(visible[0].id);
     }
   }, [visible, selectedId]);
@@ -97,9 +97,10 @@ export default function Leads() {
           </div>
         </Card>
 
-        <div className="grid md:grid-cols-[minmax(280px,380px)_1fr] gap-4 items-start">
+        {/* Side-by-side only when there is room for both panes; otherwise list → detail */}
+        <div className="grid lg:grid-cols-[minmax(260px,340px)_minmax(0,1fr)] gap-4 items-start">
           {/* Queue */}
-          <div className={`space-y-3 ${selected ? 'hidden md:block' : ''}`}>
+          <div className={`min-w-0 space-y-3 ${selected ? 'hidden lg:block' : ''}`}>
             <div className="flex gap-1 bg-white border border-stone-200 rounded-xl p-1 overflow-x-auto no-scrollbar">
               {FILTERS.map((f) => (
                 <button
@@ -189,7 +190,7 @@ export default function Leads() {
           </div>
 
           {/* Detail */}
-          <div className={selected ? '' : 'hidden md:block'}>
+          <div className={`min-w-0 ${selected ? '' : 'hidden lg:block'}`}>
             {selected ? (
               <LeadDetail
                 key={selected.id}
