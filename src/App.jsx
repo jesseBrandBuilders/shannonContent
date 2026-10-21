@@ -9,6 +9,7 @@ import Library from './pages/Library';
 import Calendar from './pages/Calendar';
 import Templates from './pages/Templates';
 import Analytics from './pages/Analytics';
+import Leads from './pages/Leads';
 
 function ProtectedShell() {
   const { session, loading } = useAuth();
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route element={<ProtectedShell />}>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/leads" element={<Leads />} />
           <Route path="/composer" element={<Composer />} />
           <Route path="/library" element={<Library />} />
           <Route path="/calendar" element={<Calendar />} />

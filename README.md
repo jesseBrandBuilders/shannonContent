@@ -16,6 +16,7 @@ Installs as a PWA on phones.
 - **Mobile + desktop** — responsive PWA, installs to phone home screen
 - **Multi-user workspace** — Shannon + up to 2 collaborators with row-level security
 - **Copy + open LinkedIn** — one-tap publish flow (no LinkedIn API approval needed)
+- **Leads queue** — AudienceLab audiences flow in by webhook or CSV, ranked by EOS fit; Claude drafts a connection note or InMail per lead (optionally sharing one of Shannon's posts), and she sends it from LinkedIn in one copy-and-open step
 
 ---
 
@@ -79,7 +80,39 @@ The recommended path is **Vercel** (free, auto-deploys from GitHub):
 3. Add the same `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` env vars in Vercel
 4. Deploy
 
-Vercel will auto-deploy on every push to `main`.
+Vercel will auto-deploy on every push to `main`. `vercel.json` rewrites app routes (like `/leads`) to `index.html`. The old static mockup is still reachable at `/preview.html`.
+
+---
+
+## Leads from AudienceLab
+
+### One-time setup
+
+1. Run `supabase/migrations/20261021000000_leads_outreach.sql` in the Supabase SQL Editor.
+2. Deploy the webhook (no JWT — it's authenticated by a per-source token in its URL):
+   ```bash
+   supabase functions deploy audiencelab-webhook --no-verify-jwt
+   supabase functions deploy claude-draft   # redeploy: adds the connection / InMail modes
+   ```
+3. In the app, open **Leads → Sources**, add a source, and copy its webhook URL.
+4. In AudienceLab, open the custom audience → **AudienceSync** → add an **HTTP endpoint** destination with that URL (POST, JSON).
+
+No webhook? Download the audience CSV from AudienceLab and use **Leads → Import CSV**. Both paths share one field mapper (`supabase/functions/_shared/leadFields.js`), which accepts the common header spellings (`LINKEDIN_URL`, `LinkedIn Url`, `JOB_TITLE`, `COMPANY_EMPLOYEE_COUNT`, …). Rows without a LinkedIn profile URL are skipped, and re-sent people are updated rather than duplicated (their status is kept).
+
+Test the webhook from a terminal:
+```bash
+curl -X POST "https://YOUR-REF.supabase.co/functions/v1/audiencelab-webhook?token=TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{"FIRST_NAME":"Test","LAST_NAME":"Lead","JOB_TITLE":"CEO","COMPANY_NAME":"Acme","COMPANY_EMPLOYEE_COUNT":"51-200","LINKEDIN_URL":"https://www.linkedin.com/in/test-lead"}]'
+```
+
+### Fit score
+
+Computed in Postgres (`public.score_lead`) on every insert/update, 0–100: owner/CEO/founder +50, COO/integrator/GM +40, VP/director +20, mentions EOS/Traction +15, company size 10–250 +35. Edit the function to retune, then `update public.leads set updated_at = now();` rescores everyone.
+
+### How sending works (and why it's manual)
+
+LinkedIn has no API for sending invites or InMail from a personal account, and tools that automate it do so by driving the account with its session cookie, which violates LinkedIn's terms and gets accounts restricted. So the app does everything up to the send button: pick the next best-fit lead, draft the note, copy it, open the profile. Shannon pastes and sends (Connect → Add a note, or Message), then taps **Sent — next lead** to log it and advance. The pacing bar tracks invites against LinkedIn's ~100/week ceiling.
 
 ---
 
@@ -123,6 +156,9 @@ A small admin UI for this can be added in v1.1.
 - `templates` — reusable post structures
 - `ratings` — Shannon's self-ratings on engagement & resonance
 - `hashtags` / `post_hashtags` — tag library
+- `lead_sources` — one per AudienceLab webhook, holds its secret token
+- `leads` — people to reach, deduped per workspace on normalized LinkedIn URL, with fit score + status
+- `lead_outreach` — every connection note / InMail sent, linked to the post it shared
 
 All tables have row-level security policies so users only see data in their workspaces.
 
@@ -169,8 +205,9 @@ src/
 ├── components/
 │   ├── layout/         AppShell, PageHeader
 │   └── ui/             Button, Input, Card, Modal, Toast
-├── pages/              Login, Dashboard, Composer, Library, Calendar, Templates, Analytics
-├── hooks/              useAuth, usePosts
+│   └── leads/          LeadDetail, ImportLeadsModal, SourcesModal
+├── pages/              Login, Dashboard, Leads, Composer, Library, Calendar, Templates, Analytics
+├── hooks/              useAuth, usePosts, useLeads
 ├── lib/                supabase, claude, linkedin
 ├── App.jsx             Router + auth gate
 └── main.jsx            Entry
@@ -178,7 +215,9 @@ src/
 supabase/
 ├── migrations/         SQL schema (run in Supabase SQL editor)
 └── functions/
-    └── claude-draft/   Edge Function for AI drafting
+    ├── _shared/              leadFields.js (shared with the CSV import)
+    ├── claude-draft/         Edge Function for AI drafting (posts + outreach)
+    └── audiencelab-webhook/  Receives AudienceLab pushes
 ```
 
 ---
