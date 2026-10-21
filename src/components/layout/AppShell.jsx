@@ -7,12 +7,14 @@ import {
   LayoutTemplate,
   BarChart3,
   LogOut,
-  Sparkles
+  Sparkles,
+  Target
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
+  { to: '/leads', icon: Target, label: 'Leads' },
   { to: '/composer', icon: PenLine, label: 'Composer' },
   { to: '/library', icon: Library, label: 'Library' },
   { to: '/calendar', icon: Calendar, label: 'Calendar' },

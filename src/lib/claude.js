@@ -19,3 +19,30 @@ export async function generateDraft({ mode, prompt, existingContent, eosCategory
   if (error) throw new Error(error.message || 'AI draft failed');
   return data;
 }
+
+/**
+ * Draft a 1:1 outreach message for a lead.
+ * @param {Object} params
+ * @param {'connection'|'inmail'} params.kind
+ * @param {Object} params.lead - row from public.leads
+ * @param {Object} [params.post] - { content, linkedin_url } of a library post to share
+ * @param {string} [params.angle] - optional direction from Shannon
+ * @param {string} [params.existing] - current draft, to rework instead of starting over
+ * @returns {Promise<{subject: string, body: string}>}
+ */
+export async function generateOutreach({ kind, lead, post, angle, existing }) {
+  const { full_name, title, headline, company, company_size, industry, location } = lead;
+  const { data, error } = await supabase.functions.invoke('claude-draft', {
+    body: {
+      mode: kind,
+      lead: { full_name, title, headline, company, company_size, industry, location },
+      post: post ? { content: post.content, linkedin_url: post.linkedin_url } : undefined,
+      prompt: angle,
+      existingContent: existing
+    }
+  });
+
+  if (error) throw new Error(error.message || 'AI draft failed');
+  if (data?.error) throw new Error(data.error);
+  return data;
+}

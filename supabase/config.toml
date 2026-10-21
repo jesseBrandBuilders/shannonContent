@@ -5,3 +5,8 @@ project_id = "shannon-content-studio"
 
 [functions.claude-draft]
 verify_jwt = true
+
+# Called by AudienceLab, not by a signed-in user; authenticated by the
+# per-source token in the URL instead.
+[functions.audiencelab-webhook]
+verify_jwt = false
