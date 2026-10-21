@@ -22,6 +22,7 @@ import { useLeadOutreach, useLogOutreach, useUpdateLead } from '../../hooks/useL
 import { generateOutreach } from '../../lib/claude';
 import { copyAndOpenProfile, copyToClipboard } from '../../lib/linkedin';
 import { FitBadge, LEAD_STATUS } from './leadUi';
+import { SitePreview } from './SitePreview';
 
 const NOTE_MAX = 300;
 const SUBJECT_MAX = 200;
@@ -201,6 +202,9 @@ export function LeadDetail({ lead, workspaceId, onBack, onNext }) {
           )}
         </div>
       </Card>
+
+      {/* Company site — quick poser check */}
+      <SitePreview lead={lead} />
 
       {/* Composer */}
       <Card className="p-5 space-y-4">

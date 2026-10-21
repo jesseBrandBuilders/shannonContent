@@ -106,6 +106,17 @@ curl -X POST "https://YOUR-REF.supabase.co/functions/v1/audiencelab-webhook?toke
   -d '[{"FIRST_NAME":"Test","LAST_NAME":"Lead","JOB_TITLE":"CEO","COMPANY_NAME":"Acme","COMPANY_EMPLOYEE_COUNT":"51-200","LINKEDIN_URL":"https://www.linkedin.com/in/test-lead"}]'
 ```
 
+### Company site check
+
+Each lead's detail shows their company website, so you can weed out posers before writing anything. The domain comes from the lead's company domain, then any website column in the import, then their work email's domain (Gmail and other webmail are ignored); you can type one in too.
+
+The `site-check` function (`supabase functions deploy site-check`) fetches the homepage server-side and flags: live, error status, unreachable or non-resolving domain, parked / for-sale, redirects to a different domain, coming-soon / unfinished pages, no HTTPS. It also reports whether the site allows embedding.
+
+- Sites that allow it are shown **live** in a sandboxed iframe. Their page can't navigate the app or reach Shannon's session.
+- Many sites block embedding (`X-Frame-Options` / CSP `frame-ancestors`). For those the panel shows a **screenshot** from [thum.io](https://www.thum.io/): free for 1,000 a month, no key needed, and only fetched when the live view isn't possible. To use a paid screenshot service instead, set `VITE_SCREENSHOT_URL_TEMPLATE` in Vercel, with `{url}` where the address goes.
+
+Tests: `deno test supabase/functions/site-check/analyze.test.ts`
+
 ### Fit score
 
 Computed in Postgres (`public.score_lead`) on every insert/update, 0–100: owner/CEO/founder +50, COO/integrator/GM +40, VP/director +20, mentions EOS/Traction +15, company size 10–250 +35. Edit the function to retune, then `update public.leads set updated_at = now();` rescores everyone.
@@ -113,6 +124,53 @@ Computed in Postgres (`public.score_lead`) on every insert/update, 0–100: owne
 ### How sending works (and why it's manual)
 
 LinkedIn has no API for sending invites or InMail from a personal account, and tools that automate it do so by driving the account with its session cookie, which violates LinkedIn's terms and gets accounts restricted. So the app does everything up to the send button: pick the next best-fit lead, draft the note, copy it, open the profile. Shannon pastes and sends (Connect → Add a note, or Message), then taps **Sent — next lead** to log it and advance. The pacing bar tracks invites against LinkedIn's ~100/week ceiling.
+
+---
+
+## Content autopilot
+
+Shannon doesn't write posts anymore — she reviews them. The app learns her voice from her own posts, drafts a week at a time, and puts the drafts in **Review**. She approves (it moves to the Calendar as scheduled), edits inline, redoes with a note, or rejects with a reason. Nothing is posted without her approval.
+
+### One-time setup
+
+1. Run `supabase/migrations/20261021100000_content_autopilot.sql` in the SQL Editor.
+2. Deploy the functions and set the cron secret:
+   ```bash
+   supabase secrets set AUTOPILOT_CRON_SECRET=$(openssl rand -hex 24)   # note the value
+   supabase functions deploy claude-draft                               # now voice-aware
+   supabase functions deploy weekly-batch --no-verify-jwt
+   ```
+3. In the app → **Autopilot**: upload Shannon's LinkedIn export (LinkedIn → Settings → Data privacy → *Get a copy of your data*; the .zip works as-is, or just `Shares.csv`), and/or paste samples. Then **Learn her voice**, and read/edit the profile it writes.
+4. Pick posts per week, days, time and topics, switch Autopilot on, and save. **Write 3 now** gives you a first batch to judge immediately.
+
+### Schedule the weekly run
+
+In Supabase → Database → Extensions, enable `pg_cron` and `pg_net`, then run (replace the two placeholders):
+
+```sql
+select cron.schedule(
+  'content-autopilot-weekly',
+  '0 11 * * 5',   -- Fridays 11:00 UTC = 7am Eastern (6am in winter)
+  $$
+  select net.http_post(
+    url     := 'https://YOUR-REF.supabase.co/functions/v1/weekly-batch',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron-secret', 'YOUR_AUTOPILOT_CRON_SECRET'),
+    body    := '{}'::jsonb
+  );
+  $$
+);
+```
+
+A scheduled run skips any workspace that still has a full batch unreviewed, so drafts never pile up. Check runs with `select * from cron.job_run_details order by start_time desc limit 5;`.
+
+### How it stays honest and gets better
+
+- **No invented stories.** Drafts are written from patterns an Implementer commonly sees. Where a real client story or number would help, the draft leaves a `[[placeholder]]` and Review flags it, so nothing made-up goes out under her name.
+- **Feedback loop.** Every batch reads her voice profile, a few of her real posts, her three most recent approved drafts, and her last rejection notes ("too salesy", "never say 'game-changer'").
+- **Topic rotation and gap-filling.** Batches favor the EOS topics she has covered least recently, skip days that already have a post, and use her time zone, including the daylight-saving change.
+- The **Focus** box in Autopilot ("Q4 planning season — lean into annual planning") is read by every batch until she changes it.
+
+Planner tests: `deno test supabase/functions/weekly-batch/plan.test.ts`
 
 ---
 
@@ -159,6 +217,9 @@ A small admin UI for this can be added in v1.1.
 - `lead_sources` — one per AudienceLab webhook, holds its secret token
 - `leads` — people to reach, deduped per workspace on normalized LinkedIn URL, with fit score + status
 - `lead_outreach` — every connection note / InMail sent, linked to the post it shared
+- `voice_samples` — Shannon's own posts (LinkedIn export / pasted), deduped by content
+- `content_settings` — autopilot schedule, topics, focus, and her learned voice profile
+- `posts.status` also has `review` (autopilot draft awaiting her) and `rejected` (kept with `review_note` to steer future batches)
 
 All tables have row-level security policies so users only see data in their workspaces.
 
@@ -206,8 +267,8 @@ src/
 │   ├── layout/         AppShell, PageHeader
 │   └── ui/             Button, Input, Card, Modal, Toast
 │   └── leads/          LeadDetail, ImportLeadsModal, SourcesModal
-├── pages/              Login, Dashboard, Leads, Composer, Library, Calendar, Templates, Analytics
-├── hooks/              useAuth, usePosts, useLeads
+├── pages/              Login, Dashboard, Review, Leads, Library, Calendar, Composer, Autopilot, Templates, Analytics
+├── hooks/              useAuth, usePosts, useLeads, useAutopilot
 ├── lib/                supabase, claude, linkedin
 ├── App.jsx             Router + auth gate
 └── main.jsx            Entry
@@ -215,9 +276,11 @@ src/
 supabase/
 ├── migrations/         SQL schema (run in Supabase SQL editor)
 └── functions/
-    ├── _shared/              leadFields.js (shared with the CSV import)
-    ├── claude-draft/         Edge Function for AI drafting (posts + outreach)
-    └── audiencelab-webhook/  Receives AudienceLab pushes
+    ├── _shared/              leadFields.js (shared with the CSV import), postPrompt.ts, voice.ts
+    ├── claude-draft/         AI drafting: posts, outreach, voice profile
+    ├── weekly-batch/         Autopilot: drafts a week into Review (plan.ts + tests)
+    ├── audiencelab-webhook/  Receives AudienceLab pushes
+    └── site-check/           Lead website check (analyze.ts + tests)
 ```
 
 ---

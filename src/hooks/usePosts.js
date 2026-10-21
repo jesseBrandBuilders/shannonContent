@@ -10,7 +10,9 @@ export function usePosts(filters = {}) {
         .select('*, ratings(*), post_hashtags(hashtags(*))')
         .order('created_at', { ascending: false });
 
+      // Rejected autopilot drafts are kept only to steer future batches
       if (filters.status) query = query.eq('status', filters.status);
+      else query = query.neq('status', 'rejected');
       if (filters.eosCategory) query = query.eq('eos_category', filters.eosCategory);
 
       const { data, error } = await query;

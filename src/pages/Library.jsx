@@ -9,6 +9,7 @@ import { usePosts } from '../hooks/usePosts';
 import { format } from 'date-fns';
 
 const STATUS_VARIANT = {
+  review: 'indigo',
   draft: 'default',
   scheduled: 'amber',
   published: 'green'
@@ -16,6 +17,7 @@ const STATUS_VARIANT = {
 
 const FILTERS = [
   { value: 'all', label: 'All' },
+  { value: 'review', label: 'In review' },
   { value: 'draft', label: 'Drafts' },
   { value: 'scheduled', label: 'Scheduled' },
   { value: 'published', label: 'Published' }
